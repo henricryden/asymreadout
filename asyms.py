@@ -22,6 +22,11 @@ template = """
         padding: 5px;
         width: inherit;
     }
+    .tqcoeffs {
+        background-color: #EDE1EA;
+        padding: 5px;
+        width: inherit;
+    }
 </style>
 
 
@@ -35,6 +40,12 @@ template = """
         return ret;
     }
 
+    function polyeval3(coeffs) {
+        return function(x){
+            return coeffs[2]*x*x + coeffs[1]*x + coeffs[0];
+        }
+    }
+
     function polyeval4(coeffs) {
         return function(x){
             return coeffs[3]*x*x*x + coeffs[2]*x*x + coeffs[1]*x + coeffs[0];
@@ -42,10 +53,14 @@ template = """
     }
 
     window.splineWave=function(coeffs, time) {
-        const map1 = time.map(polyeval4(coeffs));
-        return map1;
+        const wave = time.map(polyeval4(coeffs));
+        return wave;
     }
     
+    window.quadWave=function(coeffs, time) {
+        const wave = time.map(polyeval3(coeffs));
+        return wave;
+    }
     window.setSpanPosition=function(span, pos) {
         span.location = pos;
     }
@@ -77,29 +92,43 @@ def addSpan(fig, name, color='black'):
 
 
 def plotAsym(args):
-    p1 = figure(width=600, height=600, toolbar_location=None)
+    p1 = figure(width=600, height=400, toolbar_location=None)
     p2 = figure(width=600, height=200, toolbar_location=None)
+    pq = figure(width=600, height=400, toolbar_location=None, x_range=p1.x_range)
     spans = {'echo': addSpan(p1, 'echo', 'chocolate'),
              'mid': addSpan(p1, 'mid', '#6B8E23'),
              'echoM': addSpan(p2, 'echoM', 'chocolate'),
-             'midM': addSpan(p2, 'midM', '#6B8E23')}
-    divs = {'acoeffs': Div(css_classes=['acoeffs']), 'bcoeffs': Div(css_classes=['bcoeffs'])}
+             'midM': addSpan(p2, 'midM', '#6B8E23'),
+             'echoQ': addSpan(pq, 'echoQ', 'chocolate'),
+             'midQ': addSpan(pq, 'midQ', '#6B8E23')}
+    divs = {'acoeffs': Div(css_classes=['acoeffs']), 'bcoeffs': Div(css_classes=['bcoeffs']), 'tqcoeffs': Div(css_classes=['tqcoeffs'])}
     lineCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0], 'moment': [0, 0]})
+    trapCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
+    quadCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0], 'moment': [0, 0]})
     p1.line(x='time', y='amp', source=lineCDS, line_color='navy', line_width=1.5)
     p2.line(x='time', y='moment', source=lineCDS, line_color='navy', line_width=1.5)
+    p2.line(x='time', y='moment', source=quadCDS, line_color='mediumseagreen', line_width=1.5)
+    pq.line(x='time', y='amp', source=trapCDS, line_color='gray', line_width=1.5)
+    pq.line(x='time', y='amp', source=quadCDS, line_color='mediumseagreen', line_width=1.5)
     p1.xaxis.axis_label = 'Time [ms]'
     p1.yaxis.axis_label = 'Amplitude'
     p2.yaxis.axis_label = 'k-Space coordinate'
+    pq.yaxis.axis_label = 'Amplitude'
     p1.yaxis.formatter = NumeralTickFormatter(format="0.0")
     p2.yaxis.formatter = NumeralTickFormatter(format="0.0")
+    pq.yaxis.formatter = NumeralTickFormatter(format="0.0")
     cb = CheckboxGroup(labels=["Mirror positive shifts"], active=[0])
     sliders = OrderedDict({'tas': Slider(start=0, end=2, value=1, step=.1, title="Acquisition start", name='tas'),
                            'ttc': Slider(start=0, end=10, value=3, step=.01, title="Time to center", name='ttc'),
                            'tae': Slider(start=0, end=10, value=5, step=.1, title="Acquisition end", name='tae'),
-                           'Mp': Slider(start=0, end=5, value=2, step=.1, title="Padding area", name='Mp'),
-                           'M': Slider(start=0, end=50, value=25, step=.1, title="Sampling area", name='M')})
+                           'Mp': Slider(start=0, end=5, value=1, step=1, title="Padding area", name='Mp'),
+                           'M': Slider(start=0, end=150, value=75, step=5, title="Sampling area", name='M')})
     sliderCallbackUW = CustomJS(
-    args={'sliders': sliders, 'spans': spans, 'divs': divs, 'CDS': {'line': lineCDS}, 'checkbox': cb},
+    args={'figs': {'quad': pq, 'moment': p2, 'spline': p1},
+          'sliders': sliders,
+          'spans': spans,
+          'divs': divs,
+          'CDS': {'line': lineCDS, 'trap': trapCDS, 'quad': quadCDS}, 'checkbox': cb},
     code="""
     let M = sliders['M'].value;
     let Mp = sliders['Mp'].value;
@@ -109,8 +138,10 @@ def plotAsym(args):
     let centerpoint = (tae+tas)/2;
     window.setSpanPosition(spans['echo'], ttc);
     window.setSpanPosition(spans['echoM'], ttc);
+    window.setSpanPosition(spans['echoQ'], ttc);
     window.setSpanPosition(spans['mid'], centerpoint);
     window.setSpanPosition(spans['midM'], centerpoint);
+    window.setSpanPosition(spans['midQ'], centerpoint);
     let flip = ttc > centerpoint && checkbox.active.length
     if (flip) {
         ttc = centerpoint - (ttc - centerpoint);
@@ -149,15 +180,40 @@ def plotAsym(args):
     moment = moment.map(x => x / momentMax - 0.5);
     CDS['line'].data.moment = moment;
     CDS['line'].change.emit();
-    
+
+    let trapamp = M/(tae-tas)
+    let trapramp = Mp*2/trapamp
+    let t_cip = (tae-tas)/2
+    let q0 = 1/(2/trapamp - 1/(g0+b0))
+    let q2 = 3*M/(2*t_cip*t_cip*t_cip) - 3*(q0)/(t_cip*t_cip)
+    CDS['trap'].data.time = [tas-trapramp, tas, tae, tae+trapramp]
+    CDS['trap'].data.amp = [0, trapamp, trapamp, 0]
+    CDS['trap'].change.emit();
+
+    let timesquad = linspace(-(tae-tas)/2, (tae-tas)/2, points);
+    let quad = window.quadWave([q0, 0, q2], timesquad)
+    let quadramp = Mp*2/quad[0]
+    time = [ tas - quadramp, tas, ...linspace(tas, tae, points), tae + quadramp]
+    amp = [ 0, quad[0], ...quad, 0]
+    CDS['quad'].data.time = time
+    CDS['quad'].data.amp = amp
+    let quadmoment = window.integrate(time, amp);
+    let quadmomentMax = Math.max(...quadmoment);
+    quadmoment = quadmoment.map(x => x / quadmomentMax - 0.5);
+    CDS['quad'].data.moment = quadmoment;
+    CDS['quad'].change.emit()
+
     divs['acoeffs'].text = 'g0 = ' + g0.toFixed(2) + '<br>'
                          + 'a1 = ' + a1.toFixed(2) + '<br>'
                          + 'a2 = ' + a2.toFixed(2) + '<br>'
                          + 'a3 = ' + a3.toFixed(2) + '<br>';
-    divs['bcoeffs'].text = 'b0 =' + b0.toFixed(2) + '<br>'
+    divs['bcoeffs'].text = 's0 =' + (g0+b0).toFixed(2) + '<br>'
                          + 'b1 = ' + b1.toFixed(2) + '<br>'
                          + 'b2 = ' + b2.toFixed(2) + '<br>'
                          + 'b3 = ' + b3.toFixed(2) + '<br>';
+    divs['tqcoeffs'].text = 'q0 =' + q0.toFixed(2) + '<br>'
+                          + 'q2 =' + q2.toFixed(2) + '<br>'
+                          + 'λ = ' + trapamp.toFixed(2) + '<br>';
     sliders['ttc'].title = 'Time to center: (dt = ' + (ttc - centerpoint).toFixed(2) + ' ms)';
     """
     )
@@ -168,10 +224,13 @@ def plotAsym(args):
     l = layout([
         [p1, [column(list(sliders.values())),
               [cb],
-              row(divs['acoeffs'], divs['bcoeffs'])]],
+              row(divs['acoeffs'], divs['bcoeffs'], divs['tqcoeffs'])]],
+        [pq],
         [p2]
+        
     ])
-    save(l, filename='asym.html', template=template)
+    output_file('asym.html')
+    save(l, template=template)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
