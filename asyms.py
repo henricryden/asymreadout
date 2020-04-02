@@ -3,7 +3,7 @@ import numpy as np
 import bokeh
 from collections import OrderedDict
 from bokeh.plotting import figure, output_file, save, show
-from bokeh.models import ColumnDataSource, CustomJS, Title, HoverTool, Span, NormalHead, Arrow, LinearColorMapper, ColorBar, NumeralTickFormatter, Range1d
+from bokeh.models import ColumnDataSource, CustomJS, Title, HoverTool, Span, NormalHead, Arrow, LinearColorMapper, ColorBar, NumeralTickFormatter, Range1d, Legend
 from bokeh.palettes import viridis, plasma
 from bokeh.layouts import column, row, layout
 from bokeh.models.widgets import Slider, Div, CheckboxGroup
@@ -117,8 +117,11 @@ def plotAsym(args):
     p1 = figure(width=600, height=400, toolbar_location=None)
     p2 = figure(width=600, height=200, toolbar_location=None)
     pq = figure(width=600, height=400, toolbar_location=None, x_range=p1.x_range)
+    pSamplingDensitySQ = figure(width=600, height=200, toolbar_location=None, title="Sampling density (dwell time)")
     pSamplingDensityST = figure(width=600, height=200, toolbar_location=None)
-    pSamplingDensitySQ = figure(width=600, height=200, toolbar_location=None)
+    pSamplingDensityST.yaxis.axis_label = 'Time per sample [us]'
+    pSamplingDensitySQ.yaxis.axis_label = 'Time per sample [us]'
+    
     spans = {'echo': addSpan(p1, 'echo', 'chocolate'),
              'mid': addSpan(p1, 'mid', '#6B8E23'),
              'echoM': addSpan(p2, 'echoM', 'chocolate'),
@@ -134,13 +137,17 @@ def plotAsym(args):
     densityyRange = Range1d(0, 100)
     pSamplingDensityST.y_range = densityyRange
     pSamplingDensitySQ.y_range = densityyRange
-    p1.line(x='time', y='amp', source=lineCDS, line_color='navy', line_width=2)
-    p2.line(x='time', y='spline', source=momentCDS, line_color='navy', line_width=2)
+    p1.line(x='time', y='amp', source=lineCDS, line_color='orchid', line_width=2)
+    p2.line(x='time', y='spline', source=momentCDS, line_color='orchid', line_width=2)
     p2.line(x='time', y='quad', source=momentCDS, line_color='olive', line_width=2)
-    pq.line(x='time', y='amp', source=trapCDS, line_color='gray', line_width=2, line_alpha=.5)
+    pq.line(x='time', y='amp', source=trapCDS, line_color='salmon', line_width=2, line_alpha=.5)
     pq.line(x='time', y='amp', source=quadCDS, line_color='olive', line_width=2)
-    pSamplingDensitySQ.varea_stack(['quad', 'spline'], x='samples', color=("grey", "lightgrey"), source=densityCDS)
-    pSamplingDensityST.varea_stack(['trap', 'spline'], x='samples', color=("black", "lightgrey"), source=densityCDS)
+    r_sdqs = pSamplingDensitySQ.varea_stack(['quad', 'spline'], x='samples', color=("olive", "thistle"), source=densityCDS, legend_label=['Quad', 'Spline'])
+    r_sdts = pSamplingDensityST.varea_stack(['trap', 'spline'], x='samples', color=("lightsalmon", "thistle"), source=densityCDS, legend_label=['Trap', 'Spline'])
+    pSamplingDensityST.legend.orientation = "horizontal"
+    pSamplingDensitySQ.legend.orientation = "horizontal"
+    pSamplingDensityST.legend.location = 'top_center'
+    pSamplingDensitySQ.legend.location = 'top_center'
     #pSamplingDensityST.line(x='samples', y='quad', color="red", source=densityCDS)
 #    pSamplingDensityST.varea_stack(['spline', 'quad'], x='samples', color=("grey", "lightgrey"), source=densityCDS)
     p1.xaxis.axis_label = 'Time [ms]'
@@ -280,7 +287,7 @@ def plotAsym(args):
     CDS['sd'].change.emit()
     
     ranges['density.y'].start = 0
-    ranges['density.y'].end = Math.max(...[...quaddwelltime, ...splinedwelltime, ...trapdwelltime]) *1.35
+    ranges['density.y'].end = (Math.max(...trapdwelltime) + Math.max(...splinedwelltime)) * 1.1
 
     divs['acoeffs'].text = 'g0 = ' + g0.toFixed(2) + '<br>'
                          + 'a1 = ' + a1.toFixed(2) + '<br>'
