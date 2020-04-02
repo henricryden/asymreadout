@@ -3,7 +3,7 @@ import numpy as np
 import bokeh
 from collections import OrderedDict
 from bokeh.plotting import figure, output_file, save, show
-from bokeh.models import ColumnDataSource, CustomJS, Title, HoverTool, Span, NormalHead, Arrow, LinearColorMapper, ColorBar, NumeralTickFormatter
+from bokeh.models import ColumnDataSource, CustomJS, Title, HoverTool, Span, NormalHead, Arrow, LinearColorMapper, ColorBar, NumeralTickFormatter, Range1d
 from bokeh.palettes import viridis, plasma
 from bokeh.layouts import column, row, layout
 from bokeh.models.widgets import Slider, Div, CheckboxGroup
@@ -52,9 +52,31 @@ template = """
         }
     }
 
+    window.normalizeAndCenter=function(ay) {
+        let maxval = Math.max(...ay)
+        return ay.map(x => x / maxval - 0.5)
+    }
+
     window.splineWave=function(coeffs, time) {
         const wave = time.map(polyeval4(coeffs));
         return wave;
+    }
+    
+    window.counts=function(ay, N) {
+        let dx = Math.max(...ay) / N
+        ay = ay.map(el => Math.floor(el / dx))
+        let counts = new Array(N).fill(0);
+        for (var i = 0; i < ay.length; i++) {
+            counts[ay[i]] += 1;
+        }
+        if (counts.length != N) {
+            counts.pop();
+        }
+        return counts;
+    }
+    
+    window.reciprocal=function(ay) {
+        return ay.map(x => 1/x);
     }
     
     window.quadWave=function(coeffs, time) {
@@ -95,6 +117,8 @@ def plotAsym(args):
     p1 = figure(width=600, height=400, toolbar_location=None)
     p2 = figure(width=600, height=200, toolbar_location=None)
     pq = figure(width=600, height=400, toolbar_location=None, x_range=p1.x_range)
+    pSamplingDensityST = figure(width=600, height=200, toolbar_location=None)
+    pSamplingDensitySQ = figure(width=600, height=200, toolbar_location=None)
     spans = {'echo': addSpan(p1, 'echo', 'chocolate'),
              'mid': addSpan(p1, 'mid', '#6B8E23'),
              'echoM': addSpan(p2, 'echoM', 'chocolate'),
@@ -102,14 +126,23 @@ def plotAsym(args):
              'echoQ': addSpan(pq, 'echoQ', 'chocolate'),
              'midQ': addSpan(pq, 'midQ', '#6B8E23')}
     divs = {'acoeffs': Div(css_classes=['acoeffs']), 'bcoeffs': Div(css_classes=['bcoeffs']), 'tqcoeffs': Div(css_classes=['tqcoeffs'])}
-    lineCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0], 'moment': [0, 0]})
+    lineCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
     trapCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
-    quadCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0], 'moment': [0, 0]})
-    p1.line(x='time', y='amp', source=lineCDS, line_color='navy', line_width=1.5)
-    p2.line(x='time', y='moment', source=lineCDS, line_color='navy', line_width=1.5)
-    p2.line(x='time', y='moment', source=quadCDS, line_color='mediumseagreen', line_width=1.5)
-    pq.line(x='time', y='amp', source=trapCDS, line_color='gray', line_width=1.5)
-    pq.line(x='time', y='amp', source=quadCDS, line_color='mediumseagreen', line_width=1.5)
+    quadCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
+    momentCDS = ColumnDataSource({'time': [0, 1], 'quad': [0,1], 'spline': [0,1]})
+    densityCDS = ColumnDataSource({'samples':[0, 1], 'trap': [1, 1], 'quad': [1,3], 'spline': [1,2]})
+    densityyRange = Range1d(0, 100)
+    pSamplingDensityST.y_range = densityyRange
+    pSamplingDensitySQ.y_range = densityyRange
+    p1.line(x='time', y='amp', source=lineCDS, line_color='navy', line_width=2)
+    p2.line(x='time', y='spline', source=momentCDS, line_color='navy', line_width=2)
+    p2.line(x='time', y='quad', source=momentCDS, line_color='olive', line_width=2)
+    pq.line(x='time', y='amp', source=trapCDS, line_color='gray', line_width=2, line_alpha=.5)
+    pq.line(x='time', y='amp', source=quadCDS, line_color='olive', line_width=2)
+    pSamplingDensitySQ.varea_stack(['quad', 'spline'], x='samples', color=("grey", "lightgrey"), source=densityCDS)
+    pSamplingDensityST.varea_stack(['trap', 'spline'], x='samples', color=("black", "lightgrey"), source=densityCDS)
+    #pSamplingDensityST.line(x='samples', y='quad', color="red", source=densityCDS)
+#    pSamplingDensityST.varea_stack(['spline', 'quad'], x='samples', color=("grey", "lightgrey"), source=densityCDS)
     p1.xaxis.axis_label = 'Time [ms]'
     p1.yaxis.axis_label = 'Amplitude'
     p2.yaxis.axis_label = 'k-Space coordinate'
@@ -122,19 +155,22 @@ def plotAsym(args):
                            'ttc': Slider(start=0, end=10, value=3, step=.01, title="Time to center", name='ttc'),
                            'tae': Slider(start=0, end=10, value=5, step=.1, title="Acquisition end", name='tae'),
                            'Mp': Slider(start=0, end=5, value=1, step=1, title="Padding area", name='Mp'),
-                           'M': Slider(start=0, end=150, value=75, step=5, title="Sampling area", name='M')})
+                           'M': Slider(start=0, end=150, value=75, step=5, title="Sampling area", name='M'),
+                           'samples': Slider(start=64, end=256, value=96, step=32, title="Samples", name='samples')})
     sliderCallbackUW = CustomJS(
-    args={'figs': {'quad': pq, 'moment': p2, 'spline': p1},
+    args={'figs': {'quad': pq, 'moment': p2, 'spline': p1, 'sdsq': pSamplingDensitySQ, 'sdst': pSamplingDensityST},
           'sliders': sliders,
           'spans': spans,
           'divs': divs,
-          'CDS': {'line': lineCDS, 'trap': trapCDS, 'quad': quadCDS}, 'checkbox': cb},
+          'ranges': {'density.y': densityyRange},
+          'CDS': {'line': lineCDS, 'trap': trapCDS, 'quad': quadCDS, 'sd': densityCDS, 'moment': momentCDS}, 'checkbox': cb},
     code="""
     let M = sliders['M'].value;
     let Mp = sliders['Mp'].value;
     let tae = sliders['tae'].value;
     let tas = sliders['tas'].value;
     let ttc = sliders['ttc'].value;
+    let samples = sliders['samples'].value
     let centerpoint = (tae+tas)/2;
     window.setSpanPosition(spans['echo'], ttc);
     window.setSpanPosition(spans['echoM'], ttc);
@@ -175,10 +211,6 @@ def plotAsym(args):
     amp = [0, g0, ...splines, g0, 0]
     CDS['line'].data.amp = amp
     CDS['line'].data.time = time
-    let moment = window.integrate(time, amp);
-    let momentMax = Math.max(...moment);
-    moment = moment.map(x => x / momentMax - 0.5);
-    CDS['line'].data.moment = moment;
     CDS['line'].change.emit();
 
     let trapamp = M/(tae-tas)
@@ -197,11 +229,58 @@ def plotAsym(args):
     amp = [ 0, quad[0], ...quad, 0]
     CDS['quad'].data.time = time
     CDS['quad'].data.amp = amp
-    let quadmoment = window.integrate(time, amp);
-    let quadmomentMax = Math.max(...quadmoment);
-    quadmoment = quadmoment.map(x => x / quadmomentMax - 0.5);
-    CDS['quad'].data.moment = quadmoment;
     CDS['quad'].change.emit()
+    
+    timesquad = linspace(-(tae-tas)/2, (tae-tas)/2, samples);
+    quad = window.quadWave([q0, 0, q2], timesquad)
+    quadmoment = window.integrate(timesquad, quad)
+    quadmoment = window.normalizeAndCenter(quadmoment)
+    
+    let trapmoment = window.integrate(linspace(tas, tae, samples), linspace(trapamp, trapamp, samples))
+    trapmoment = window.normalizeAndCenter(trapmoment)
+
+    times1 = linspace(0, t1, Math.round( samples*t1/(tae-tas)) );
+    times1.pop()
+    times2 = linspace(0, t2, Math.round( samples*t2/(tae-tas)) +1 );
+    spline1 = window.splineWave([g0,  a1, a2, a3], times1);
+    spline2 = window.splineWave([g0+b0, b1, b2, b3], times2);
+    let splinemoment = window.integrate(linspace(tas, tae, samples), [...spline1, ...spline2])
+    splinemoment = window.normalizeAndCenter(splinemoment)
+        
+    CDS['moment'].data.spline = splinemoment;
+    CDS['moment'].data.quad = quadmoment;
+    CDS['moment'].data.time = linspace(tas, tae, samples)
+    CDS['moment'].change.emit()
+    
+    let dwell = 0.0002
+    let samplesRaw = Math.round((tae-tas) / dwell)
+    console.log(samplesRaw)
+    let quadRaw = window.quadWave([q0, 0, q2], linspace(-(tae-tas)/2, (tae-tas)/2, samplesRaw));
+    timesquad = linspace(-(tae-tas)/2, (tae-tas)/2, samplesRaw);
+    quadmomentRaw = window.integrate(timesquad, quadRaw)
+    let quaddwelltime = window.counts(quadmomentRaw, samples)
+    
+    times1 = linspace(0, t1, Math.round( samplesRaw*t1/(tae-tas)) );
+    times1.pop()
+    times2 = linspace(0, t2, Math.round( samplesRaw*t2/(tae-tas)) +1 );
+    spline1 = window.splineWave([g0,  a1, a2, a3], times1);
+    spline2 = window.splineWave([g0+b0, b1, b2, b3], times2);
+    let splinemomentRaw = window.integrate(linspace(tas, tae, samplesRaw), [...spline1, ...spline2])
+    let splinedwelltime = window.counts(splinemomentRaw, samples)
+    
+    let trapdwelltime = window.counts(linspace(0, splinemomentRaw.slice(-1)[0], samplesRaw), samples)
+    
+    quaddwelltime = quaddwelltime.map(x => x * dwell * 1000)
+    trapdwelltime = trapdwelltime.map(x => x * dwell * 1000)
+    splinedwelltime = splinedwelltime.map(x => x * dwell * 1000)
+    CDS['sd'].data.samples = [...Array(quaddwelltime.length).keys()]
+    CDS['sd'].data.quad = quaddwelltime
+    CDS['sd'].data.trap = trapdwelltime
+    CDS['sd'].data.spline = splinedwelltime
+    CDS['sd'].change.emit()
+    
+    ranges['density.y'].start = 0
+    ranges['density.y'].end = Math.max(...[...quaddwelltime, ...splinedwelltime, ...trapdwelltime]) *1.35
 
     divs['acoeffs'].text = 'g0 = ' + g0.toFixed(2) + '<br>'
                          + 'a1 = ' + a1.toFixed(2) + '<br>'
@@ -213,7 +292,10 @@ def plotAsym(args):
                          + 'b3 = ' + b3.toFixed(2) + '<br>';
     divs['tqcoeffs'].text = 'q0 =' + q0.toFixed(2) + '<br>'
                           + 'q2 =' + q2.toFixed(2) + '<br>'
-                          + 'λ = ' + trapamp.toFixed(2) + '<br>';
+                          + 'λ = ' + trapamp.toFixed(2) + '<br>'
+                          + 'trapdt = ' + (trapdwelltime[samples/2]).toFixed(2) + '<br>'
+                          + 'quaddt = ' + (quaddwelltime[samples/2]).toFixed(2) + '<br>'
+                          + 'splinedt = ' + (splinedwelltime[samples/2]).toFixed(2) + '<br>';
     sliders['ttc'].title = 'Time to center: (dt = ' + (ttc - centerpoint).toFixed(2) + ' ms)';
     """
     )
@@ -226,8 +308,9 @@ def plotAsym(args):
               [cb],
               row(divs['acoeffs'], divs['bcoeffs'], divs['tqcoeffs'])]],
         [pq],
-        [p2]
-        
+        [p2],
+        [pSamplingDensitySQ],
+        [pSamplingDensityST]
     ])
     output_file('asym.html')
     save(l, template=template)
