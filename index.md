@@ -1,10 +1,10 @@
 ---
 layout: page
-title: Supplementary Materials for "CSE using Asymmetric Readout Waveforms"
+title: Supplementary Materials
 description: The official site for all things related to asymmetric readouts
 ---
 
-This page hosts interactive plots related to the paper "Chemical Shift Encoding using Asymmetric Readout Waveforms".
+This page hosts interactive plots related to the paper "Chemical Shift Encoding using Asymmetric Readout Waveforms", currently in revision.
 
 You can access source code to reproduce the plots shown here at the [asymreadout repository on GitHub](https://github.com/henricryden/asymreadout).
 
