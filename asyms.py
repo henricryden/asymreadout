@@ -117,7 +117,7 @@ def plotAsym(args):
     p1 = figure(width=600, height=400, toolbar_location=None)
     p2 = figure(width=600, height=200, toolbar_location=None)
     pq = figure(width=600, height=400, toolbar_location=None, x_range=p1.x_range)
-    pSamplingDensitySQ = figure(width=600, height=200, toolbar_location=None, title="Sampling density (dwell time)")
+    pSamplingDensitySQ = figure(width=600, height=200, toolbar_location=None, title="Sampling density (eff. dwell time across k-space)")
     pSamplingDensityST = figure(width=600, height=200, toolbar_location=None)
     pSamplingDensityST.yaxis.axis_label = 'Time per sample [us]'
     pSamplingDensitySQ.yaxis.axis_label = 'Time per sample [us]'
@@ -128,7 +128,11 @@ def plotAsym(args):
              'midM': addSpan(p2, 'midM', '#6B8E23'),
              'echoQ': addSpan(pq, 'echoQ', 'chocolate'),
              'midQ': addSpan(pq, 'midQ', '#6B8E23')}
-    divs = {'acoeffs': Div(css_classes=['acoeffs']), 'bcoeffs': Div(css_classes=['bcoeffs']), 'tqcoeffs': Div(css_classes=['tqcoeffs'])}
+    divs = {'acoeffs': Div(css_classes=['acoeffs']),
+            'bcoeffs': Div(css_classes=['bcoeffs']),
+            'tqcoeffs': Div(css_classes=['tqcoeffs']),
+            'summary': Div(css_classes=['summary'])}
+            
     lineCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
     trapCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
     quadCDS = ColumnDataSource({'time': [0, 1], 'amp': [0, 0]})
@@ -151,19 +155,19 @@ def plotAsym(args):
     #pSamplingDensityST.line(x='samples', y='quad', color="red", source=densityCDS)
 #    pSamplingDensityST.varea_stack(['spline', 'quad'], x='samples', color=("grey", "lightgrey"), source=densityCDS)
     p1.xaxis.axis_label = 'Time [ms]'
-    p1.yaxis.axis_label = 'Amplitude'
+    p1.yaxis.axis_label = 'Amplitude [G/cm]'
     p2.yaxis.axis_label = 'k-Space coordinate'
-    pq.yaxis.axis_label = 'Amplitude'
+    pq.yaxis.axis_label = 'Amplitude [G/cm]'
     p1.yaxis.formatter = NumeralTickFormatter(format="0.0")
     p2.yaxis.formatter = NumeralTickFormatter(format="0.0")
     pq.yaxis.formatter = NumeralTickFormatter(format="0.0")
     cb = CheckboxGroup(labels=["Mirror positive shifts"], active=[0])
-    sliders = OrderedDict({'tas': Slider(start=0, end=2, value=1, step=.1, title="Acquisition start", name='tas'),
-                           'ttc': Slider(start=0, end=10, value=3, step=.01, title="Time to center", name='ttc'),
-                           'tae': Slider(start=0, end=10, value=5, step=.1, title="Acquisition end", name='tae'),
-                           'Mp': Slider(start=0, end=5, value=1, step=1, title="Padding area", name='Mp'),
-                           'M': Slider(start=0, end=150, value=75, step=5, title="Sampling area", name='M'),
-                           'samples': Slider(start=64, end=256, value=96, step=32, title="Samples", name='samples')})
+    sliders = OrderedDict({'tas': Slider(start=0, end=1, value=0.6, step=.05, title="Acquisition start (tas) [ms]", name='tas'),
+                           'shift': Slider(start=-2, end=2, value=0, step=.1, title="CSE shift [ms]", name='shift'),
+                           'tacq': Slider(start=0, end=10, value=5, step=1, title="Acquisition time [ms]", name='tacq'),
+                           'Mp': Slider(start=0, end=.150, value=.1, step=0.01, title="Padding area (Mp) [G/cm * ms]", name='Mp'),
+                           'M': Slider(start=0.5500, end=5, value=3.3, step=.250, title="Sampling area (M), [G/cm * ms]", name='M'),
+                           'samples': Slider(start=64, end=512, value=256, step=32, title="Samples", name='samples')})
     sliderCallbackUW = CustomJS(
     args={'figs': {'quad': pq, 'moment': p2, 'spline': p1, 'sdsq': pSamplingDensitySQ, 'sdst': pSamplingDensityST},
           'sliders': sliders,
@@ -174,9 +178,15 @@ def plotAsym(args):
     code="""
     let M = sliders['M'].value;
     let Mp = sliders['Mp'].value;
-    let tae = sliders['tae'].value;
+    
+    let shift = sliders['shift'].value;
+    let tacq = sliders['tacq'].value;
     let tas = sliders['tas'].value;
-    let ttc = sliders['ttc'].value;
+    
+    let tae = tas + tacq;
+    let ttc = tas + tacq/2 + shift;
+    let oldttc = ttc;
+    
     let samples = sliders['samples'].value
     let centerpoint = (tae+tas)/2;
     window.setSpanPosition(spans['echo'], ttc);
@@ -212,7 +222,8 @@ def plotAsym(args):
     let splines = [...spline1, ...spline2]
     if (flip) {
         splines.reverse()
-        ttc = sliders['ttc'].value;
+        ttc = tas + tacq/2 + shift;
+        console.log(ttc)
     }
     time = [0, tas, ...linspace(tas,ttc,points), ...linspace(ttc, tae, points), tae, tae+tas]
     amp = [0, g0, ...splines, g0, 0]
@@ -280,6 +291,11 @@ def plotAsym(args):
     quaddwelltime = quaddwelltime.map(x => x * dwell * 1000)
     trapdwelltime = trapdwelltime.map(x => x * dwell * 1000)
     splinedwelltime = splinedwelltime.map(x => x * dwell * 1000)
+    if (flip) {
+        quaddwelltime.reverse();
+        trapdwelltime.reverse();
+        splinedwelltime.reverse();
+    }
     CDS['sd'].data.samples = [...Array(quaddwelltime.length).keys()]
     CDS['sd'].data.quad = quaddwelltime
     CDS['sd'].data.trap = trapdwelltime
@@ -299,11 +315,13 @@ def plotAsym(args):
                          + 'b3 = ' + b3.toFixed(2) + '<br>';
     divs['tqcoeffs'].text = 'q0 =' + q0.toFixed(2) + '<br>'
                           + 'q2 =' + q2.toFixed(2) + '<br>'
-                          + 'λ = ' + trapamp.toFixed(2) + '<br>'
-                          + 'trapdt = ' + (trapdwelltime[samples/2]).toFixed(2) + '<br>'
-                          + 'quaddt = ' + (quaddwelltime[samples/2]).toFixed(2) + '<br>'
-                          + 'splinedt = ' + (splinedwelltime[samples/2]).toFixed(2) + '<br>';
-    sliders['ttc'].title = 'Time to center: (dt = ' + (ttc - centerpoint).toFixed(2) + ' ms)';
+                          + 'λ = ' + trapamp.toFixed(2) + '<br>';
+    divs['summary'].text = 'Spline peak slew rate is ' + (a1*10.0).toFixed(1) + ' T/m/s.<br>'
+                         + 'Spline peak gradient amplitude is ' + (Math.max(...splines)*10.0).toFixed(1) + ' mT/m.<br>'
+                         + 'Effective dwell time at k-space center:<br>'
+                         + '    Stretched trapezoid ' + (trapdwelltime[samples/2]).toFixed(2) + ' µs<br>'
+                         + '    Spline ' + (splinedwelltime[samples/2]).toFixed(2) + ' µs<br>'
+                         + '    Quadratic ' + (quaddwelltime[samples/2]).toFixed(2) + ' µs<br>';
     """
     )
     [s.js_on_change('value', sliderCallbackUW) for s in sliders.values()]
@@ -311,14 +329,11 @@ def plotAsym(args):
     
     
     l = layout([
-        [p1, [column(list(sliders.values())),
+        [[p1, pq, p2], [column(list(sliders.values())),
               [cb],
-              row(divs['acoeffs'], divs['bcoeffs'], divs['tqcoeffs'])]],
-        [pq],
-        [p2],
-        [pSamplingDensitySQ],
-        [pSamplingDensityST]
-    ])
+              row(divs['acoeffs'], divs['bcoeffs'], divs['tqcoeffs']),
+              divs['summary']],
+        [pSamplingDensitySQ, pSamplingDensityST]]])
     output_file('asym.html')
     save(l, template=template)
 
