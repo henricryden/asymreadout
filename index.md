@@ -1,6 +1,6 @@
 ---
 layout: page
-title: Supplementary Materials
+title: Supplementary Material
 description: The official site for all things related to asymmetric readouts
 ---
 
